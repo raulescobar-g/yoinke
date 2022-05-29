@@ -95,10 +95,20 @@ fn spawn_planet(mut command: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mat
 
 fn spawn_light(mut command: Commands) {
     command.spawn_bundle(PointLightBundle {
-        transform: Transform::from_xyz(0.0, 10.0, 0.0),
+        transform: Transform::from_xyz(0.0, 20.0, 0.0),
         point_light: PointLight {
-            intensity: 2000.0, // lumens - roughly a 100W non-halogen incandescent bulb
-            color: Color::BLUE,
+            intensity: 200000.0, // lumens - roughly a 100W non-halogen incandescent bulb
+            color: Color::WHITE,
+            shadows_enabled: false,
+            ..default()
+        },
+        ..default()
+    });
+    command.spawn_bundle(PointLightBundle {
+        transform: Transform::from_xyz(0.0, -20.0, 0.0),
+        point_light: PointLight {
+            intensity: 200000.0, // lumens - roughly a 100W non-halogen incandescent bulb
+            color: Color::WHITE,
             shadows_enabled: false,
             ..default()
         },
