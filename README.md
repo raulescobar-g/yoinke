@@ -19,25 +19,18 @@ You should keep the `credits` directory up to date. The release workflow automat
  1. Replace `build/windows/icon.ico` (used for windows executable and as favicon for the web-builds)
  2. Replace `build/macos/icon_1024x1024.png` with a `1024` times `1024` pixel png icon and run `create_icns.sh` (make sure to run the script inside the `macos` directory) - _Warning: sadly this seems to require a mac..._
 
-### Deploy web build to GitHub pages
- 1. Activate [GitHub pages](https://pages.github.com/) for your repository
-    1. Source from the `gh-pages` branch
- 2. Trigger the `deploy-github-page` workflow
- 3. After a few minutes your game is live at `http://username.github.io/repository`
 
 
 
 #### TODOS:
 1. make 3d player with camera
-   - player is a box
-   - figure out how to attach
    - get the little editor thing up
-   - godmode type flying
+   - pass player pos to terrain gen
 
 2. make basic terrain that autogens and autodeletes
-   - port code from other repo
-   - map it and figure out how many tiles to map
-   - size of tile
+   - sphere
+   - terrain gen
+   - better terrain
    - skybox of stars
 
 3. physics for player
@@ -55,7 +48,7 @@ You should keep the `credits` directory up to date. The release workflow automat
    - mountains
    - water
    - caves?
-   
+
 5. make sphere for planets
 6. fix physics for planet stuff
 7. make player model

@@ -7,7 +7,7 @@ use bevy::prelude::*;
 pub struct PlayerPlugin;
 
 #[derive(Component)]
-struct Player;
+pub struct Player;
 
 #[derive(Component)]
 struct Camera;
@@ -45,7 +45,7 @@ impl Plugin for PlayerPlugin {
 
 fn spawn_camera(mut commands: Commands) {
     commands.spawn_bundle(PerspectiveCameraBundle {
-        transform: Transform::from_xyz(-5., 5., -5.).looking_at(Vec3::ZERO, Vec3::Y),
+        transform: Transform::from_xyz(0., 5., 0.).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
     })
     .insert(Camera);
@@ -63,7 +63,7 @@ fn spawn_player(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
                 emissive: Color::rgba_linear(0.0, 0.0, 100.0, 0.0),
                 ..default()
             }),
-            transform:Transform::from_xyz(-5., 5., -5.).looking_at(Vec3::ZERO, Vec3::Y),
+            transform:Transform::from_xyz(0., 5., 0.).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         })
         .insert(Player)
