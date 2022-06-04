@@ -3,6 +3,7 @@ use bevy::input::mouse::MouseMotion;
 use bevy::ecs::event::{Events, ManualEventReader};
 use crate::GameState;
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::*;
 
 pub struct PlayerPlugin;
 
@@ -11,14 +12,6 @@ pub struct Player;
 
 #[derive(Component)]
 struct Camera;
-
-#[derive(Component)]
-struct Collides;
-
-#[derive(Component)]
-struct Physics {
-    mass : f32
-}
 
 /// This plugin handles player related stuff like movement
 /// Player logic is only active during the State `GameState::Playing`
@@ -66,11 +59,7 @@ fn spawn_player(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
             transform:Transform::from_xyz(0., 5., 0.).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         })
-        .insert(Player)
-        .insert(Collides)
-        .insert(Physics{
-            mass: 1.0f32
-        });
+        .insert(Player);
 }
 
 fn move_player(

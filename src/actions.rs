@@ -1,6 +1,6 @@
 use crate::GameState;
 use bevy::prelude::*;
-
+use bevy_rapier3d::prelude::*;
 pub struct ActionsPlugin;
 
 // This plugin listens for keyboard input and converts the input into Actions

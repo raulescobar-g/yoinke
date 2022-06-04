@@ -3,6 +3,8 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use noise::{NoiseFn, Perlin, Seedable};
 use crate::GameState;
 use bevy_inspector_egui::{Inspectable, InspectorPlugin};
+use bevy_rapier3d::prelude::*;
+
 #[derive(Inspectable, Debug)]
 struct PlanetOptions {
     #[inspectable(min = 1.0, max = 1000.0)]
@@ -47,6 +49,7 @@ impl Plugin for TerrainPlugin {
             SystemSet::on_enter(GameState::Playing)
                 .with_system(spawn_planet)
                 .with_system(spawn_light)
+                .with_system(spawn_ball)
         )
         .add_system_set(
             SystemSet::on_update(GameState::Playing)
@@ -55,27 +58,13 @@ impl Plugin for TerrainPlugin {
     }
 }
 
-fn planet_respawn(data: Res<PlanetOptions>, mut command: Commands, mut planet_entities: Query<(Entity,&Planet)>,mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
-    if !data.is_changed() {
-        return;
-    } else {
+fn planet_respawn(data: Res<PlanetOptions>, mut command: Commands, mut planet_entities: Query<(Entity,&Planet)>, meshes: ResMut<Assets<Mesh>>, materials: ResMut<Assets<StandardMaterial>>) {
+    if data.is_changed() {
         for (entity,_) in planet_entities.iter_mut() {
             command.entity(entity).despawn();
         }
 
-        for face in create_planet(&data){
-            command.spawn_bundle(PbrBundle {
-                mesh: meshes.add(face),
-                material: materials.add(StandardMaterial {
-                    base_color: Color::WHITE,
-                    perceptual_roughness: 0.0,
-                    ..default()
-                }),
-                transform: Transform::from_xyz(data.pos.x, data.pos.y, data.pos.z).with_scale(Vec3::new(data.radius, data.radius, data.radius)) ,
-                ..default()
-            }).insert(Planet);
-        };
-
+        spawn_planet(command, meshes, materials, data);
     }
 }
 
@@ -86,8 +75,12 @@ struct Planet;
 fn spawn_planet(mut command: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, data: Res<PlanetOptions>) {
 
     for face in create_planet(&data){
+
+        let collider = Collider::from_bevy_mesh(&face, &ComputedColliderShape::TriMesh).unwrap();
+        collider.set_scale(Vec3::new(data.radius, data.radius, data.radius), data.resolution);
+
         command.spawn_bundle(PbrBundle {
-            mesh: meshes.add(face),
+            mesh: meshes.add(face ),
             material: materials.add(StandardMaterial {
                 base_color: Color::WHITE,
                 perceptual_roughness: 0.0,
@@ -95,7 +88,8 @@ fn spawn_planet(mut command: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mat
             }),
             transform: Transform::from_xyz(data.pos.x, data.pos.y, data.pos.z).with_scale(Vec3::new(data.radius, data.radius, data.radius)) ,
             ..default()
-        }).insert(Planet);
+        }).insert(Planet)
+        .insert(collider);
     };
 
     
@@ -121,6 +115,24 @@ fn spawn_light(mut command: Commands) {
             shadows_enabled: false,
             ..default()
         },
+        ..default()
+    });
+}
+
+fn spawn_ball(mut command : Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials : ResMut<Assets<StandardMaterial>>) {
+    command.spawn_bundle(PbrBundle {
+        mesh: meshes.add(Mesh::from(shape::Icosphere {
+            radius: 0.45,
+            subdivisions: 32,
+        })),
+        material: materials.add(StandardMaterial {
+            base_color: Color::hex("ffd891").unwrap(),
+            // vary key PBR parameters on a grid of spheres to show the effect
+            metallic: 0.5,
+            perceptual_roughness: 0.5,
+            ..default()
+        }),
+        transform: Transform::from_xyz(3.0, 3.0, 3.0),
         ..default()
     });
 }
@@ -169,14 +181,14 @@ fn generate_mesh(face: TerrainFace, data: &Res<PlanetOptions>) -> Mesh {
             let mut position = (face.local_up + face.axis_a * x_scaled + face.axis_b * z_scaled).normalize();
 
             for _ in 0..data.layers {
-                let pos = (((face.local_up + face.axis_a * x_scaled + face.axis_b * z_scaled).normalize() * frequency) + data.centre);
+                let pos = ((face.local_up + face.axis_a * x_scaled + face.axis_b * z_scaled).normalize() * frequency) + data.centre;
                 let v = noise.get(pos.as_dvec3().to_array()) as f32;
                 h += (v+1.0) * 0.5 * amplitude;
                 frequency *= data.roughness;
                 amplitude *= data.persistence;
             }
 
-            position *= (1. + ((h - data.minimum).min(0.) * data.strength));
+            position *= 1. + ((h - data.minimum).min(0.) * data.strength);
 
             vertices.push(position.to_array());
             textures.push([position[0], position[1]]);
@@ -199,7 +211,7 @@ fn generate_mesh(face: TerrainFace, data: &Res<PlanetOptions>) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, textures);
     mesh.set_indices(Some(Indices::U32( indices )));
 
-    return mesh;
+    mesh
 }
 
 fn create_planet(data: &Res<PlanetOptions>) -> Vec<Mesh> {
@@ -208,7 +220,7 @@ fn create_planet(data: &Res<PlanetOptions>) -> Vec<Mesh> {
 
     let dirs = vec![Vec3::new(1.0,0.0,0.0), Vec3::new(-1.0,0.0,0.0), Vec3::new(0.0,1.0,0.0), Vec3::new(0.0,-1.0,0.0), Vec3::new(0.0,0.0,1.0), Vec3::new(0.0,0.0,-1.0)];
     for face in dirs.iter() {
-        let terrain_face = TerrainFace::allocate(face.clone());
+        let terrain_face = TerrainFace::allocate(*face);
         meshes.push(generate_mesh(terrain_face, data));
     }
     meshes
