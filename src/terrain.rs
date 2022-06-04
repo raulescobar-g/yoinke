@@ -3,29 +3,36 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use noise::{NoiseFn, Perlin, Seedable};
 use crate::GameState;
 use bevy_inspector_egui::{Inspectable, InspectorPlugin};
-
 #[derive(Inspectable, Debug)]
 struct PlanetOptions {
     #[inspectable(min = 1.0, max = 1000.0)]
     radius: f32,
+    layers: u32,
+    persistence: f32,
+    base_roughness: f32,
     resolution: u32,
     seed: u32,
     pos: Vec3,
     strength: f32,
     roughness: f32,
     centre: Vec3,
+    minimum: f32,
 }
 
 impl Default for PlanetOptions {
     fn default() -> Self {
         PlanetOptions {
             radius: 1.0,
+            layers: 1,
+            persistence: 0.5,
+            base_roughness: 1.0,
             resolution: 10,
             seed: 1,
             pos: Vec3::new(0.0,0.0,0.0),
             strength: 1.0,
-            roughness: 1.0,
+            roughness: 2.0,
             centre: Vec3::new(0.0,0.0,0.0),
+            minimum: 0.0,
         }
     }
 }
@@ -56,7 +63,7 @@ fn planet_respawn(data: Res<PlanetOptions>, mut command: Commands, mut planet_en
             command.entity(entity).despawn();
         }
 
-        for face in create_planet(data.resolution, data.strength, data.roughness, data.seed, data.centre){
+        for face in create_planet(&data){
             command.spawn_bundle(PbrBundle {
                 mesh: meshes.add(face),
                 material: materials.add(StandardMaterial {
@@ -78,7 +85,7 @@ struct Planet;
 
 fn spawn_planet(mut command: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, data: Res<PlanetOptions>) {
 
-    for face in create_planet(data.resolution, data.strength, data.roughness, data.seed, data.centre){
+    for face in create_planet(&data){
         command.spawn_bundle(PbrBundle {
             mesh: meshes.add(face),
             material: materials.add(StandardMaterial {
@@ -90,6 +97,8 @@ fn spawn_planet(mut command: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mat
             ..default()
         }).insert(Planet);
     };
+
+    
 }
 
 
@@ -134,45 +143,53 @@ impl TerrainFace {
     }
 }
 
-fn generate_mesh(face: TerrainFace, resolution: u32, strength: f32, roughness: f32, seed: u32, centre: Vec3) -> Mesh {
+fn generate_mesh(face: TerrainFace, data: &Res<PlanetOptions>) -> Mesh {
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
     let noise = Perlin::new();
-    let noise = noise.set_seed(seed);
+    let noise = noise.set_seed(data.seed);
 
-    let vert_count = resolution * resolution;
-    let tile_count = (resolution-1) * (resolution-1) * 6;
+    let vert_count = data.resolution * data.resolution;
+    let tile_count = (data.resolution-1) * (data.resolution-1) * 6;
 
     let mut vertices: Vec<[f32;3]> = Vec::with_capacity(vert_count as usize);
     let mut normals:Vec<[f32;3]> = Vec::with_capacity(vert_count as usize);
     let mut textures: Vec<[f32;2]> = Vec::with_capacity(vert_count as usize);
     let mut indices: Vec<u32> = Vec::with_capacity(tile_count as usize);
 
-    for z in 0..resolution {
-        for x in 0..resolution {
-            let i = z * resolution + x;
-            let x_scaled = ((x as f32 /(resolution-1) as f32) - 0.5) * 2.0;
-            let z_scaled = ((z as f32 /(resolution-1) as f32) - 0.5) * 2.0;
+    for z in 0..data.resolution {
+        for x in 0..data.resolution {
+            let i = z * data.resolution + x;
+            let x_scaled = ((x as f32 /(data.resolution-1) as f32) - 0.5) * 2.0;
+            let z_scaled = ((z as f32 /(data.resolution-1) as f32) - 0.5) * 2.0;
 
-            let mut pos = (((face.local_up + face.axis_a * x_scaled + face.axis_b * z_scaled).normalize() * roughness) + centre);
+            let mut h: f32 = 0.0;
+            let mut frequency = data.base_roughness;
+            let mut amplitude = 1.0;
 
-            let h = 1.0 + (1.0 + noise.get(pos.as_dvec3().to_array()) * 0.5 * strength as f64) as f32;
+            let mut position = (face.local_up + face.axis_a * x_scaled + face.axis_b * z_scaled).normalize();
 
-            pos[0] *= h;
-            pos[1] *= h;
-            pos[2] *= h;
+            for _ in 0..data.layers {
+                let pos = (((face.local_up + face.axis_a * x_scaled + face.axis_b * z_scaled).normalize() * frequency) + data.centre);
+                let v = noise.get(pos.as_dvec3().to_array()) as f32;
+                h += (v+1.0) * 0.5 * amplitude;
+                frequency *= data.roughness;
+                amplitude *= data.persistence;
+            }
 
-            vertices.push(pos.to_array());
-            textures.push([pos[0], pos[1]]);
-            normals.push(pos.to_array());
+            position *= (1. + ((h - data.minimum).min(0.) * data.strength));
 
-            if x != resolution-1 && z != resolution-1 {
+            vertices.push(position.to_array());
+            textures.push([position[0], position[1]]);
+            normals.push(position.to_array());
+
+            if x != data.resolution-1 && z != data.resolution-1 {
                 indices.push(i);
-                indices.push(i + resolution + 1);
-                indices.push(i + resolution);
+                indices.push(i + data.resolution + 1);
+                indices.push(i + data.resolution);
 
                 indices.push(i);
                 indices.push(i+1);
-                indices.push(i + resolution + 1);
+                indices.push(i + data.resolution + 1);
             }
         }
     }
@@ -185,14 +202,14 @@ fn generate_mesh(face: TerrainFace, resolution: u32, strength: f32, roughness: f
     return mesh;
 }
 
-fn create_planet(res: u32, strength: f32, roughness: f32, seed: u32, centre: Vec3) -> Vec<Mesh> {
+fn create_planet(data: &Res<PlanetOptions>) -> Vec<Mesh> {
    
     let mut meshes: Vec<Mesh> = Vec::with_capacity(6);
 
     let dirs = vec![Vec3::new(1.0,0.0,0.0), Vec3::new(-1.0,0.0,0.0), Vec3::new(0.0,1.0,0.0), Vec3::new(0.0,-1.0,0.0), Vec3::new(0.0,0.0,1.0), Vec3::new(0.0,0.0,-1.0)];
     for face in dirs.iter() {
         let terrain_face = TerrainFace::allocate(face.clone());
-        meshes.push(generate_mesh(terrain_face, res, strength, roughness, seed, centre));
+        meshes.push(generate_mesh(terrain_face, data));
     }
     meshes
 }
