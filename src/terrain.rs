@@ -1,5 +1,9 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
+use bevy_inspector_egui::egui::epaint::textures;
 use noise::{NoiseFn, Perlin, Seedable};
 use crate::GameState;
 use bevy_inspector_egui::{Inspectable, InspectorPlugin};
@@ -54,6 +58,7 @@ impl Plugin for TerrainPlugin {
         .add_system_set(
             SystemSet::on_update(GameState::Playing)
                 .with_system(planet_respawn)
+                .with_system(gravity)
         );
     }
 }
@@ -74,25 +79,50 @@ struct Planet;
 
 fn spawn_planet(mut command: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, data: Res<PlanetOptions>) {
 
-    for face in create_planet(&data){
+    let planet_mesh = create_planet(&data);
 
-        let collider = Collider::from_bevy_mesh(&face, &ComputedColliderShape::TriMesh).unwrap();
-        collider.set_scale(Vec3::new(data.radius, data.radius, data.radius), data.resolution);
+    let scale = Vec3::new(data.radius, data.radius, data.radius);
+    let transform = Transform::from_xyz(data.pos.x, data.pos.y, data.pos.z).with_scale(scale);
+    let collider = Collider::from_bevy_mesh(&planet_mesh, &ComputedColliderShape::TriMesh).unwrap();
 
-        command.spawn_bundle(PbrBundle {
-            mesh: meshes.add(face ),
-            material: materials.add(StandardMaterial {
-                base_color: Color::WHITE,
-                perceptual_roughness: 0.0,
-                ..default()
-            }),
-            transform: Transform::from_xyz(data.pos.x, data.pos.y, data.pos.z).with_scale(Vec3::new(data.radius, data.radius, data.radius)) ,
+    command.spawn_bundle(PbrBundle {
+        mesh: meshes.add(planet_mesh ),
+        material: materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            perceptual_roughness: 0.0,
             ..default()
-        }).insert(Planet)
-        .insert(collider);
-    };
-
+        }),
+        transform: transform,
+        ..default()
+    }).insert(Planet)
+    .insert(collider)
+    .insert(ExternalForce {
+        force: Vec3::new(0.0, 0.0, 0.0),
+        torque: Vec3::new(0.0, 0.0, 0.0),
+    })
+    .insert(ColliderMassProperties::Density(1.0))
+    .insert(RigidBody::Dynamic)
+    .insert(GravityScale(0.0));
     
+}
+
+fn gravity(mut body_query: Query<(&mut ExternalForce, & MassProperties, & Transform)>) {
+
+    let mut net_force = Vec3::ZERO;
+
+    let mut iter = body_query.iter_mut();
+
+    while let Some((mut force, body , pos)) = iter.next() {
+
+        for (_ ,ext_body, ext_pos) in iter.by_ref() {
+
+            if pos.translation != ext_pos.translation {
+                let r = ext_pos.translation - pos.translation;
+                net_force += r.normalize() * ((body.mass * ext_body.mass) / r.length_squared());
+            }
+        }
+        force.force = net_force;
+    } 
 }
 
 
@@ -120,11 +150,19 @@ fn spawn_light(mut command: Commands) {
 }
 
 fn spawn_ball(mut command : Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials : ResMut<Assets<StandardMaterial>>) {
+
+    let sphere_mesh = Mesh::from(shape::Icosphere {
+        radius: 0.45,
+        subdivisions: 10,
+    });
+
+    let transform = Transform::from_xyz(3.0, 3.0, 3.0);
+
+    let mut collider = Collider::from_bevy_mesh(&sphere_mesh, &ComputedColliderShape::TriMesh).unwrap();
+    collider.set_scale(Vec3::new(0.45,0.45,0.45), 32);
+
     command.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Icosphere {
-            radius: 0.45,
-            subdivisions: 32,
-        })),
+        mesh: meshes.add(sphere_mesh),
         material: materials.add(StandardMaterial {
             base_color: Color::hex("ffd891").unwrap(),
             // vary key PBR parameters on a grid of spheres to show the effect
@@ -132,31 +170,46 @@ fn spawn_ball(mut command : Commands, mut meshes: ResMut<Assets<Mesh>>, mut mate
             perceptual_roughness: 0.5,
             ..default()
         }),
-        transform: Transform::from_xyz(3.0, 3.0, 3.0),
+        transform: transform,
         ..default()
-    });
+    }).insert(collider)
+    .insert(ExternalForce {
+        force: Vec3::new(0.0, 0.0, 0.0),
+        torque: Vec3::new(0.0, 0.0, 0.0),
+    })
+    .insert(ColliderMassProperties::Density(1.0))
+    .insert(RigidBody::Dynamic)
+    .insert(GravityScale(0.0));
 }
 
 struct TerrainFace {
     local_up: Vec3,
     axis_a: Vec3,
     axis_b: Vec3,
+    order: u8,
 }
 
 impl TerrainFace {
-    pub fn allocate(local_up: Vec3) -> TerrainFace {
+    pub fn allocate(local_up: Vec3, order: u8) -> TerrainFace {
         let axis_a = Vec3::new(local_up.y, local_up.z , local_up.x);
         let axis_b = local_up.cross(axis_a);
         TerrainFace {
             local_up,
             axis_a,
-            axis_b
+            axis_b,
+            order,
         }
     }
 }
 
-fn generate_mesh(face: TerrainFace, data: &Res<PlanetOptions>) -> Mesh {
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+struct MeshData {
+    vertices: Vec<[f32;3]>,
+    normals : Vec<[f32;3]>,
+    textures : Vec<[f32;2]>,
+    indices : Vec<u32>,
+}
+
+fn generate_mesh(face: TerrainFace, data: &Res<PlanetOptions>) -> MeshData {
     let noise = Perlin::new();
     let noise = noise.set_seed(data.seed);
 
@@ -195,33 +248,60 @@ fn generate_mesh(face: TerrainFace, data: &Res<PlanetOptions>) -> Mesh {
             normals.push(position.to_array());
 
             if x != data.resolution-1 && z != data.resolution-1 {
-                indices.push(i);
-                indices.push(i + data.resolution + 1);
-                indices.push(i + data.resolution);
+                indices.push(face.order as u32 * vert_count + i);
+                indices.push(face.order as u32 * vert_count + i + data.resolution + 1);
+                indices.push(face.order as u32 * vert_count + i + data.resolution);
 
-                indices.push(i);
-                indices.push(i+1);
-                indices.push(i + data.resolution + 1);
+                indices.push(face.order as u32 * vert_count + i);
+                indices.push(face.order as u32 * vert_count + i+1);
+                indices.push(face.order as u32 * vert_count + i + data.resolution + 1);
             }
         }
     }
 
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, textures);
-    mesh.set_indices(Some(Indices::U32( indices )));
-
-    mesh
+    MeshData {
+        vertices,
+        normals,
+        textures,
+        indices,
+    }
 }
 
-fn create_planet(data: &Res<PlanetOptions>) -> Vec<Mesh> {
+fn create_planet(data: &Res<PlanetOptions>) -> Mesh {
    
-    let mut meshes: Vec<Mesh> = Vec::with_capacity(6);
+    let mut meshes: Mesh = Mesh::new(PrimitiveTopology::TriangleList);
 
-    let dirs = vec![Vec3::new(1.0,0.0,0.0), Vec3::new(-1.0,0.0,0.0), Vec3::new(0.0,1.0,0.0), Vec3::new(0.0,-1.0,0.0), Vec3::new(0.0,0.0,1.0), Vec3::new(0.0,0.0,-1.0)];
+    let vert_count = data.resolution * data.resolution * 6;
+    let tile_count = (data.resolution-1) * (data.resolution-1) * 6 * 6;
+
+    let mut vertices: Vec<[f32;3]> = Vec::with_capacity(vert_count as usize);
+    let mut normals:Vec<[f32;3]> = Vec::with_capacity(vert_count as usize);
+    let mut textures: Vec<[f32;2]> = Vec::with_capacity(vert_count as usize);
+    let mut indices: Vec<u32> = Vec::with_capacity(tile_count as usize);
+
+    let dirs = vec![Vec3::new(1.0,0.0,0.0),
+                            Vec3::new(0.0,1.0,0.0), 
+                            Vec3::new(0.0,0.0,1.0), 
+                            Vec3::new(0.0,0.0,-1.0),
+                            Vec3::new(0.0,-1.0,0.0),
+                            Vec3::new(-1.0,0.0,0.0)];
+    let mut order: u8 = 0;
     for face in dirs.iter() {
-        let terrain_face = TerrainFace::allocate(*face);
-        meshes.push(generate_mesh(terrain_face, data));
+        let terrain_face = TerrainFace::allocate(*face, order);
+        let mut mesh_data = generate_mesh(terrain_face, data);
+
+        vertices.append(&mut mesh_data.vertices);
+        normals.append(&mut mesh_data.normals);
+        textures.append(&mut mesh_data.textures);
+        indices.append(&mut mesh_data.indices);
+
+        order += 1;
     }
+
+    meshes.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices);
+    meshes.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    meshes.insert_attribute(Mesh::ATTRIBUTE_UV_0, textures);
+    meshes.set_indices(Some(Indices::U32( indices )));
+
     meshes
 }
